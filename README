@@ -1,0 +1,297 @@
+NAME
+    Net::OBEX::FTP - implemenation of OBEX File Transfer Profile
+
+SYNOPSIS
+    This is an OBEX FTP mirrorer, you can also find it in the "examples/"
+    directory of this distribution:
+
+        use strict;
+        use warnings;
+
+        use Net::OBEX::FTP;
+        use File::Spec;
+
+        my $obex = Net::OBEX::FTP->new;
+
+        my $response = $obex->connect( address => '00:17:E3:37:76:BB', port => 9 )
+            or die "Error: " . $obex->error;
+
+        print "Mirroring root folder\n";
+
+        mirror_file( $obex, $_ )
+            for @{ $obex->files };
+
+        mirror( $obex );
+
+        sub mirror {
+            my $obex = shift;
+
+            for my $folder ( @{ $obex->folders } ) {
+                print "Mirroring `$folder`\n";
+
+                $response = $obex->cwd( path => $folder )
+                    or die "Error: " . $obex->error;
+
+                my $local_folder = File::Spec->catdir( @{ $obex->pwd } );
+                mkdir $local_folder
+                    or die "Failed to create directory `$local_folder` ($!)";
+
+                if ( @{ $obex->folders } ) {
+                    mirror( $obex );
+                }
+
+                mirror_file( $obex, $_ )
+                    for @{ $obex->files };
+
+                $response = $obex->cwd( do_up => 1 )
+                or die "Error: " . $obex->error;
+            }
+        }
+
+        sub mirror_file {
+            my ( $obex, $file ) = @_;
+            printf "Mirroring %s\n\tsize is: %d bytes\n",
+                        $file, $obex->xml->size( $file );
+
+            my $local_file = File::Spec->catfile( @{ $obex->pwd }, $file );
+            open my $fh, '>', $local_file
+                or die "Failed to open $local_file: $!";
+            binmode $fh;
+
+            $obex->get( $file, $fh )
+                or die "Failed to get file $file: " . $obex->error;
+            close $fh;
+        }
+
+DESCRIPTION
+    WARNING!!! This module is still in early alpha stage. It is recommended
+    that you use it only for testing.
+
+    The module is an implementation of OBEX File Transfer Profile.
+
+CONSTRUCTOR
+  new
+    my $obex = Net::OBEX::FTP->new;
+    Takes no arguments, returns a freshly baked Net::OBEX::FTP object.
+
+METHODS
+  connect
+        my $response_ref = $obex->connect(
+            address => '00:17:E3:37:76:BB', # mandatory
+            port    => 9,                   # mandatory
+            mtu     => 4096,                # optional
+            version => "\x10",              # optional
+        ) or die "Error: " . $obex->error;
+
+    Instructs the object to connect to the device with MAC address "address"
+    to port "port" (OBEX FTP port). The call to this method also retrieves
+    folder listing of the root folder. Takes several arguments which are as
+    follows:
+
+   address
+        ->connect( address => '00:17:E3:37:76:BB' ...
+
+    Mandatory. Takes a scalar as an value which is the address of the device
+    to connect to.
+
+   port
+        ->connect( port => 9 ...
+
+    Mandatory. Takes a scalar as an value which is the OBEX FTP port of the
+    device you are trying to connect to.
+
+   mtu
+        ->connect( mtu => 4096 ...
+
+    Optional. Takes a scalar as a value which is your MTU (Maximum
+    Transmission Unit), in other words, the maximum packet size in bytes you
+    can accept. Defaults to: 4096
+
+   version
+        ->connect( version => "\x10" ..
+
+    Optional. Takes a one byte value which specifies the version of OBEX
+    protocol to use for conversation. This argument is provided as "just in
+    case" and you really shouldn't use it. Defaults to: 0x10 (version 1.0)
+
+   "connect" RETURN VALUE
+        $VAR1 = {
+                'connect' => {
+                    # return of Net::OBEX->get here
+                },
+                'set_path' => {
+                    # return of Net::OBEX->set_path here
+                },
+                'get' => {
+                    # return of Net::OBEX->get here
+                },
+        };
+
+    The "connect()" method will return either "undef" or an empty list
+    (depending on the context) if an error occured an the description of the
+    error will be available via "error()" method. Upon success, "connect()"
+    returns a hashref with three keys.
+
+   connect
+    The "connect" key will contain the return value of Net::OBEX "connect()"
+    method.
+
+   set_path
+    The "get" key will contain the return value of Net::OBEX "set_path()"
+    method.
+
+   get
+    The "get" key will contain the return value of Net::OBEX "get()" method.
+
+  cwd
+        $obex->cwd
+            or die $obex->error;
+
+        $obex->cwd('foos')
+            or die $obex->error;
+
+        $obex->cwd( do_up => 1 )
+            or die $obex->error;
+
+    Instructs the object to change the current working ddirectory and fetch
+    the folder listing. Takes zero, one or a set of key/value arguments.
+    When called without arguments will set path to the root folder. Calling
+    with only one argument is equivalent to calling "( path =" 'foos')> with
+    'foos' being your argument. The key/value form arguments will be passed
+    directly to Net::OBEX "set_path()" method. See documentation for
+    Net::OBEX for details.
+
+    If an error occured, the "cwd()" method will return either "undef" or an
+    empty list depending on the context. Upon success it will return a
+    hashref with two keys, "set_path" and "get". The "set_path" key will
+    contain the return value of Net::OBEX "set_path()" method and "get" key
+    will contain the return value of Net::OBEX "get()" method. See
+    documentation for Net::OBEX for more information.
+
+    Note: The OBEX spec suggests that it's possible to do "cd ../foos" in
+    one call, e.g. "cwd( path =" 'foos', do_up => 1 )>; the OBEX FTP spec is
+    unclear about this. The only OBEX FTP capable device I have (Motorolla
+    KRZR phone) gives me 403 when I try to do it this way. If you have some
+    different device can you please please please confirm whether it works
+    for you or not. Thank you.
+
+  get
+        $obex->get('file.jpg')
+            or die $obex->error;
+
+        $obex->get('file.jpg', $file_handle)
+            or die $obex->error;
+
+    Instructs the object to download a file. Takes one mandatory and one
+    optional arguments. The first argument (mandatory) is the name of the
+    file to download, unless you specify the second argument the content of
+    the file will be returned as a value of "body" key in the hashref the
+    "get()" method returns. The second argument (optional) is an *opened for
+    writing* filehandle, if you specify this argument the file will be
+    written into that filehandle, use this if you are transfering large
+    files as to not store them in the memory.
+
+    If an error occured will return either "undef" or an empty list
+    depending on the context and the reason for the error will be available
+    via "error()" method. Upon success will return a hashref which is
+    exactly the same as the return value of Net::OBEX "get()" method. See
+    documentation for Net::OBEX for more information.
+
+  close
+        $obex->close;
+
+    Takes no arguments and always returns 1. Closes the connection.
+
+  pwd
+        my $pwd = join '/', @{ $obex->pwd };
+
+    Takes no arguments, returns an arrayref, each element of which will be a
+    directory name representing a level at which we are in. In other words,
+    doing "cwd('foos') ... cwd('bars') ... cwd('beers') ... cwd(do_up =" 1)>
+    will make "pwd()" return "[ 'foos', 'bars' ]". When we are in the root
+    folder, "pwd()" will return an empty arrayref.
+
+  folders
+        my $folders_in_the_current_dir_ref = $obex->folders;
+
+    As mentioned before, "cwd()" and "connect()" methods fetch folder
+    listings. The "folders()" method returns an arrayref, elements of which
+    are the names of the folders in the current working directory. If no
+    folders are present "folders()" method will return an empty arrayref.
+
+  files
+        my $files_in_the_current_dir = $obex->files;
+
+    Same as "folders()" methods, except it lists the *files* in the current
+    directory.
+
+  xml
+        my $xml_object = $obex->xml;
+
+    If "folders()" and "files()" is not enough for you feel free to use the
+    XML::OBEXFTP::FolderListing object which is provided to you via "xml()"
+    method. Takes no arguments, returns XML::OBEXFTP::FolderListing object
+    used by the module. See XML::OBEXFTP::FolderListing for more
+    information.
+
+  obex
+        my $net_obex_obj = $obex->obex;
+
+    Takes no arguments, returns a Net::OBEX object used by the module.
+
+  response
+        my $last_response = $obex->response;
+
+    Takes no arguments, returns the return value of the last successful call
+    to either "connect()", "get()" or "cwd()" method.
+
+  error
+        $obex->cwd
+            or die "Error: " . $obex->error;
+
+    Takes no arguments, returns a human readable error message explaining
+    why "get()", "connect()" or "cwd()" migh have failed.
+
+SEE ALSO
+    Net::OBEX, XML::OBEXFTP::FolderListing
+
+AUTHOR
+    Zoffix Znet, "<zoffix at cpan.org>" (<http://zoffix.com>,
+    <http://haslayout.net>, <http://zofdesign.com/>)
+
+BUGS
+    Please report any bugs or feature requests to "bug-net-obex-ftp at
+    rt.cpan.org", or through the web interface at
+    <http://rt.cpan.org/NoAuth/ReportBug.html?Queue=Net-OBEX-FTP>. I will be
+    notified, and then you'll automatically be notified of progress on your
+    bug as I make changes.
+
+SUPPORT
+    You can find documentation for this module with the perldoc command.
+
+        perldoc Net::OBEX::FTP
+
+    You can also look for information at:
+
+    *   RT: CPAN's request tracker
+
+        <http://rt.cpan.org/NoAuth/Bugs.html?Dist=Net-OBEX-FTP>
+
+    *   AnnoCPAN: Annotated CPAN documentation
+
+        <http://annocpan.org/dist/Net-OBEX-FTP>
+
+    *   CPAN Ratings
+
+        <http://cpanratings.perl.org/d/Net-OBEX-FTP>
+
+    *   Search CPAN
+
+        <http://search.cpan.org/dist/Net-OBEX-FTP>
+
+COPYRIGHT & LICENSE
+    Copyright 2008 Zoffix Znet, all rights reserved.
+
+    This program is free software; you can redistribute it and/or modify it
+    under the same terms as Perl itself.
+
